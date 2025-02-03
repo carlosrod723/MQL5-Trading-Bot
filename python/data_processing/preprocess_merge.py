@@ -10,90 +10,97 @@ import pandas as pd
 import numpy as np
 import os
 
+def load_and_preprocess(csv_file: str, timeframe_label: str) -> pd.DataFrame:
+    """
+    Loads and preprocesses a CSV file containing OHLC data.
+    
+    Parameters:
+        csv_file (str): Path to the CSV file.
+        timeframe_label (str): A string label to append to the renamed columns 
+                               (e.g., "15m" or "4h").
+                               
+    Returns:
+        pd.DataFrame: Preprocessed DataFrame with a new 'Time' column, renamed 
+                      OHLC and volume columns, and a log return column.
+    """
+    if not os.path.isfile(csv_file):
+        raise FileNotFoundError(f"{csv_file} not found.")
+    
+    df = pd.read_csv(csv_file)
+    required_cols = ["DATE", "TIME", "OPEN", "HIGH", "LOW", "CLOSE", "TICKVOL"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Missing {col} in {csv_file}.")
+
+    # Create a unified Time column
+    df["Time"] = pd.to_datetime(df["DATE"] + " " + df["TIME"], format="%Y.%m.%d %H:%M:%S")
+    
+    # Rename columns to include the timeframe label
+    rename_dict = {
+        "OPEN": f"Open{timeframe_label}",
+        "HIGH": f"High{timeframe_label}",
+        "LOW":  f"Low{timeframe_label}",
+        "CLOSE": f"Close{timeframe_label}",
+        "TICKVOL": f"Vol{timeframe_label}"
+    }
+    df.rename(columns=rename_dict, inplace=True)
+    
+    # Drop columns that are no longer needed (ignore errors if a column doesn't exist)
+    df.drop(["DATE", "TIME", "SPREAD"], axis=1, inplace=True, errors='ignore')
+    
+    # Sort and reset the index by Time
+    df.sort_values("Time", inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    
+    # Calculate log returns and replace infinite values with 0
+    log_return_col = f"LogReturn{timeframe_label}"
+    df[log_return_col] = np.log(df[f"Close{timeframe_label}"] / df[f"Close{timeframe_label}"].shift(1))
+    df[log_return_col].replace([np.inf, -np.inf], 0, inplace=True)
+    df.dropna(subset=[log_return_col], inplace=True)
+    
+    return df
+
 def merge_timeframes(
     csv_15m: str,
     csv_4h: str,
     output_csv: str = "merged_data.csv"
 ):
     """
-    Reads the 15M and 4H CSV files, each with DATE,TIME,OPEN,HIGH,LOW,CLOSE,TICKVOL,SPREAD.
-    - Creates a Time column in both.
-    - Renames to Close15m, Close4h, etc.
-    - Resamples 4H to 15-minute intervals with forward-fill.
-    - Merges them so each 15m bar has the corresponding 4H data.
-    - Adds LogReturn15m and LogReturn4h.
-    - Saves merged CSV to output_csv.
+    Merges 15-minute and 4-hour data into a single CSV file.
+    
+    Reads the 15M and 4H CSV files (each containing DATE, TIME, OPEN, HIGH, LOW, 
+    CLOSE, TICKVOL, SPREAD), creates a 'Time' column in both, renames columns 
+    to include the timeframe (e.g. Close15m, Close4h), resamples the 4H data to 
+    15-minute intervals using forward-fill, merges the datasets using an asof 
+    merge (backward direction), and finally adds log return columns.
+    
+    The merged DataFrame is saved as CSV to the specified output file.
     """
-
-    if not os.path.isfile(csv_15m):
-        raise FileNotFoundError(f"{csv_15m} not found.")
-    if not os.path.isfile(csv_4h):
-        raise FileNotFoundError(f"{csv_4h} not found.")
-
-    # --- Read 15m data
-    df_15m = pd.read_csv(csv_15m)
-    for col in ["DATE", "TIME", "OPEN", "HIGH", "LOW", "CLOSE", "TICKVOL"]:
-        if col not in df_15m.columns:
-            raise ValueError(f"Missing {col} in 15m CSV.")
-
-    df_15m["Time"] = pd.to_datetime(df_15m["DATE"] + " " + df_15m["TIME"], format="%Y.%m.%d %H:%M:%S")
-    df_15m.rename(columns={
-        "OPEN": "Open15m",
-        "HIGH": "High15m",
-        "LOW":  "Low15m",
-        "CLOSE":"Close15m",
-        "TICKVOL": "Vol15m"
-    }, inplace=True)
-    df_15m.drop(["DATE","TIME","SPREAD"], axis=1, inplace=True, errors='ignore')
-    df_15m.sort_values("Time", inplace=True)
-    df_15m.reset_index(drop=True, inplace=True)
-
-    # Add LogReturn15m
-    df_15m["LogReturn15m"] = np.log(df_15m["Close15m"] / df_15m["Close15m"].shift(1)).replace([np.inf,-np.inf], 0)
-    df_15m.dropna(subset=["LogReturn15m"], inplace=True)
-
-    # --- Read 4H data
-    df_4h = pd.read_csv(csv_4h)
-    for col in ["DATE", "TIME", "OPEN", "HIGH", "LOW", "CLOSE", "TICKVOL"]:
-        if col not in df_4h.columns:
-            raise ValueError(f"Missing {col} in 4H CSV.")
-
-    df_4h["Time"] = pd.to_datetime(df_4h["DATE"] + " " + df_4h["TIME"], format="%Y.%m.%d %H:%M:%S")
-    df_4h.rename(columns={
-        "OPEN": "Open4h",
-        "HIGH": "High4h",
-        "LOW":  "Low4h",
-        "CLOSE":"Close4h",
-        "TICKVOL": "Vol4h"
-    }, inplace=True)
-    df_4h.drop(["DATE","TIME","SPREAD"], axis=1, inplace=True, errors='ignore')
-    df_4h.sort_values("Time", inplace=True)
-    df_4h.reset_index(drop=True, inplace=True)
-
-    # Add LogReturn4h
-    df_4h["LogReturn4h"] = np.log(df_4h["Close4h"] / df_4h["Close4h"].shift(1)).replace([np.inf,-np.inf], 0)
-    df_4h.dropna(subset=["LogReturn4h"], inplace=True)
-
-    # Convert 4H data to a 15m frequency with forward fill
+    # Process 15-minute data
+    df_15m = load_and_preprocess(csv_15m, "15m")
+    
+    # Process 4-hour data
+    df_4h = load_and_preprocess(csv_4h, "4h")
+    
+    # Resample 4H data to 15-minute frequency using forward fill
     df_4h.set_index("Time", inplace=True)
     df_4h_15m = df_4h.resample("15min").ffill().reset_index()
-
-    # --- Merge (asof-merge or normal merge on 'Time')
-    # Forward-fill approach. Each 15m bar gets the last known 4H data
-    # by matching times "backward".
+    
+    # Ensure both DataFrames are sorted by Time
     df_15m.sort_values("Time", inplace=True)
     df_4h_15m.sort_values("Time", inplace=True)
-
-    # We can do asof merge to ensure we don't skip partial times
+    
+    # Merge the data using an asof merge; each 15m bar gets the last known 4H data
     merged = pd.merge_asof(
         df_15m, df_4h_15m,
         on="Time",
         direction="backward"
     )
-
-    # Drop any rows that might have NaN due to early timestamps
+    
+    # Drop any rows that may have NaN values (often due to early timestamps)
     merged.dropna(inplace=True)
-
+    
+    # Save the merged DataFrame to CSV
     merged.to_csv(output_csv, index=False)
     print(f"Merged data saved to {output_csv} with {len(merged)} rows.")
 

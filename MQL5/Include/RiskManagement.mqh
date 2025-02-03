@@ -1,16 +1,17 @@
 //+------------------------------------------------------------------+
 //| RiskManagement.mqh                                              |
-//| Library for daily drawdown check & lot size calc.    |
+//| Library for daily drawdown check & lot size calculation in MQL5 |
 //+------------------------------------------------------------------+
 #ifndef __RISKMANAGEMENT_MQH__
 #define __RISKMANAGEMENT_MQH__
 
 //+------------------------------------------------------------------+
 //| CheckDailyDrawdown                                              |
-//| Return false if daily drawdown limit exceeded                   |
+//| Return false if daily drawdown limit is exceeded                |
 //+------------------------------------------------------------------+
 bool CheckDailyDrawdown(double limitPercent, double currentDailyLoss)
 {
+   // If daily loss is >= the limit, block new trades
    if(currentDailyLoss >= limitPercent)
       return false;
    return true;
@@ -18,25 +19,26 @@ bool CheckDailyDrawdown(double limitPercent, double currentDailyLoss)
 
 //+------------------------------------------------------------------+
 //| CalculatePositionSize                                           |
-//| Definitive risk-based formula.                                  |
+//| Definitive risk-based formula in MQL5                           |
 //+------------------------------------------------------------------+
 double CalculatePositionSize(double riskPercent, double stopLossPrice, double entryPrice, string symbol)
 {
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double balance    = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskAmount = balance * (riskPercent / 100.0);
-   double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICKVALUE);
-   double tickSize  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICKSIZE);
-   double point     = SymbolInfoDouble(symbol, SYMBOL_POINT);
 
+   // In MQL5, the correct enum is SYMBOL_TRADE_TICK_VALUE
+   double tickValue  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+   double point      = SymbolInfoDouble(symbol, SYMBOL_POINT);
+
+   // Distance in points
    double slDistancePoints = MathAbs(entryPrice - stopLossPrice) / point;
-   if(slDistancePoints < 1) slDistancePoints = 1; // avoid zero or extremely tight SL
+   if(slDistancePoints < 1) 
+      slDistancePoints = 1; // avoid extremely tight SL
 
-   // Very direct approach: 
-   // For every 1 point, we lose 'tickValue' for each lot, 
-   // so risk = (slDistancePoints * tickValue * lots)
-   // Adjust if needed.
+   // Basic formula: risk = slDistancePoints * tickValue * lots
    double lots = riskAmount / (slDistancePoints * tickValue);
-   // Round to symbol lot step
+
+   // Round to the symbol lot step
    double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
    lots = MathFloor(lots / lotStep) * lotStep;
 

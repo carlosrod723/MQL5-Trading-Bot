@@ -1,76 +1,100 @@
 //+------------------------------------------------------------------+
-//| FractalScanner.mq5                                              |
-//| Indicator to get fractal values at each bar.   |
-//| Provides iCustomFractalHigh/Low for EA usage.                    |
+//| FractalScanner.mq5                                               |
+//| MQL5 indicator that detects basic fractals with         |
+//| configurable parameters for range and display.                   |
 //+------------------------------------------------------------------+
 #property copyright ""
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
+#property strict
+
+//--- Indicator settings
 #property indicator_separate_window
 #property indicator_buffers 2
 #property indicator_plots   2
 
+//--- User Inputs
+input int   FractalRange  = 2;      // Number of bars to the left/right to check for fractal confirmation
+input int   UpArrowCode   = 233;    // Arrow code for up fractals (customizable)
+input int   DownArrowCode = 234;    // Arrow code for down fractals (customizable)
+input color UpColor       = clrLime;  // Color for up fractal arrows
+input color DownColor     = clrRed;   // Color for down fractal arrows
+
+//--- Indicator buffers
 double upBuffer[];
 double downBuffer[];
 
-#define FRAC_RANGE 2 // Checking 2 bars to left/right
-
+//+------------------------------------------------------------------+
+//| OnInit()                                                         |
 //+------------------------------------------------------------------+
 int OnInit()
-{
-   SetIndexStyle(0, DRAW_ARROW);
-   SetIndexStyle(1, DRAW_ARROW);
-   IndicatorShortName("FractalScanner");
-   SetIndexBuffer(0, upBuffer);
-   SetIndexBuffer(1, downBuffer);
-   return(INIT_SUCCEEDED);
-}
+  {
+   //--- Configure plot 0 for up fractals
+   PlotIndexSetInteger(0, PLOT_DRAW_TYPE, DRAW_ARROW);
+   PlotIndexSetInteger(0, PLOT_LINE_WIDTH, 1);
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, UpColor);      // Use PLOT_LINE_COLOR in MQL5
+   PlotIndexSetInteger(0, PLOT_ARROW, UpArrowCode);
 
+   //--- Configure plot 1 for down fractals
+   PlotIndexSetInteger(1, PLOT_DRAW_TYPE, DRAW_ARROW);
+   PlotIndexSetInteger(1, PLOT_LINE_WIDTH, 1);
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, DownColor);
+   PlotIndexSetInteger(1, PLOT_ARROW, DownArrowCode);
+
+   //--- Bind our arrays to indicator buffers
+   SetIndexBuffer(0, upBuffer, INDICATOR_DATA);
+   SetIndexBuffer(1, downBuffer, INDICATOR_DATA);
+
+   return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+//| OnCalculate() - called whenever the indicator is recalculated    |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
                 const int begin,
-                const double& price[])
-{
-   if(rates_total < (FRAC_RANGE*2+1)) return(0);
+                const double &price[])
+  {
+   // Need at least FractalRange*2+1 bars to form a fractal
+   if(rates_total < (FractalRange * 2 + 1))
+      return(0);
 
-   int start = prev_calculated-1;
-   if(start < FRAC_RANGE) start = FRAC_RANGE;
+   // Start from prev_calculated-1 to recheck the boundary bar
+   int start = prev_calculated - 1;
+   if(start < FractalRange)
+      start = FractalRange;
 
-   for(int i = start; i < rates_total-FRAC_RANGE; i++)
-   {
+   // Loop through bars and detect fractals
+   for(int i = start; i < rates_total - FractalRange; i++)
+     {
       double val = price[i];
       bool isUpFractal = true;
       bool isDownFractal = true;
-      for(int j=1; j<=FRAC_RANGE; j++)
-      {
-         if(price[i] <= price[i+j] || price[i] <= price[i-j])
+
+      // Check FractalRange bars on both sides
+      for(int j = 1; j <= FractalRange; j++)
+        {
+         // For an up fractal: current bar must be greater than both adjacent bars.
+         if(val <= price[i + j] || val <= price[i - j])
             isUpFractal = false;
-         if(price[i] >= price[i+j] || price[i] >= price[i-j])
+         // For a down fractal: current bar must be less than both adjacent bars.
+         if(val >= price[i + j] || val >= price[i - j])
             isDownFractal = false;
-      }
-      if(isUpFractal)
-      {
-         upBuffer[i] = price[i];
-      }
-      else
-      {
-         upBuffer[i] = 0.0;
-      }
-      if(isDownFractal)
-      {
-         downBuffer[i] = price[i];
-      }
-      else
-      {
-         downBuffer[i] = 0.0;
-      }
-   }
+        }
+
+      // Store the value if a fractal condition is met; otherwise, store 0.
+      upBuffer[i]   = isUpFractal   ? val : 0.0;
+      downBuffer[i] = isDownFractal ? val : 0.0;
+     }
+
    return(rates_total);
-}
+  }
 
 //+------------------------------------------------------------------+
-//| Exposed iCustom calls in EA might do something like:            |
-//| double iCustomFractalHigh(...,shift) => get upBuffer[shift]     |
-//| double iCustomFractalLow(...,shift)  => get downBuffer[shift]   |
+//| Usage in EA:                                                   |
+//|   double upVal   = iCustom(_Symbol, PERIOD_CURRENT,              |
+//|                             "FractalScanner", 0, shift);        |
+//|   double downVal = iCustom(_Symbol, PERIOD_CURRENT,              |
+//|                             "FractalScanner", 1, shift);        |
 //+------------------------------------------------------------------+
